@@ -1,50 +1,105 @@
-# Welcome to your Expo app 👋
+# 이명 완화 테라피 앱 (Tinnitus Relief App)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+이명 증상 완화를 위한 백색소음 플레이어 앱입니다. React Native와 Expo를 사용하여 개발되었습니다.
 
-## Get started
+## 주요 기능
 
-1. Install dependencies
+- 🎵 백색소음 무한 루프 재생
+- ⏰ 맞춤형 타이머 설정 (5분 ~ 120분)
+- 🌙 백그라운드 재생 지원
+- 📱 알림바 미니 플레이어 (재생 시간 표시)
+- 🔐 Google 로그인 지원
+- 📲 iOS/Android 크로스 플랫폼 지원
 
-   ```bash
-   npm install
-   ```
+## 기술 스택
 
-2. Start the app
+- **프레임워크**: React Native + Expo
+- **언어**: TypeScript
+- **오디오**: expo-av
+- **알림**: expo-notifications
+- **인증**: expo-auth-session (Google OAuth)
+- **UI 컴포넌트**: @expo/vector-icons, @react-native-community/slider
 
-   ```bash
-   npx expo start
-   ```
+## 설치 및 실행
 
-In the output, you'll find options to open the app in a
+### 필수 요구사항
+- Node.js 18.x 이상
+- npm 또는 yarn
+- Expo CLI
+- iOS 시뮬레이터 (Mac) 또는 Android 에뮬레이터
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
+### 설치
 ```bash
-npm run reset-project
+# 저장소 클론
+git clone https://github.com/yourusername/TinnitusReliefApp.git
+cd TinnitusReliefApp
+
+# 의존성 설치
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### 실행
+```bash
+# Expo 개발 서버 시작
+npm start
 
-## Learn more
+# iOS 시뮬레이터에서 실행
+npm run ios
 
-To learn more about developing your project with Expo, look at the following resources:
+# Android 에뮬레이터에서 실행
+npm run android
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## 프로젝트 구조
 
-## Join the community
+```
+TinnitusReliefApp/
+├── app/                    # 앱 화면 및 라우팅
+│   └── (tabs)/
+│       └── index.tsx      # 메인 화면
+├── components/            # React 컴포넌트
+│   ├── AuthScreen.tsx    # 로그인 화면
+│   └── PlayerScreen.tsx  # 플레이어 화면
+├── services/             # 서비스 모듈
+│   └── NotificationService.ts  # 알림 관리
+├── types/                # TypeScript 타입 정의
+│   └── index.ts
+├── assets/              # 리소스 파일
+│   └── sounds/
+│       └── white_noise.mp3  # 백색소음 파일
+└── app.json            # Expo 설정
 
-Join our community of developers creating universal apps.
+```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## 설정
+
+### Google OAuth 설정
+`components/AuthScreen.tsx` 파일에서 Google OAuth 클라이언트 ID를 설정해야 합니다:
+
+```typescript
+const [request, response, promptAsync] = Google.useAuthRequest({
+  clientId: 'YOUR_WEB_CLIENT_ID.apps.googleusercontent.com',
+  iosClientId: 'YOUR_IOS_CLIENT_ID.apps.googleusercontent.com',
+  androidClientId: 'YOUR_ANDROID_CLIENT_ID.apps.googleusercontent.com',
+});
+```
+
+## 빌드
+
+### iOS 빌드
+```bash
+expo build:ios
+```
+
+### Android 빌드
+```bash
+expo build:android
+```
+
+## 라이선스
+
+MIT License
+
+## 기여
+
+이슈 및 풀 리퀘스트를 환영합니다!
