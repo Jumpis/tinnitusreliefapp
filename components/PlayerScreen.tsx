@@ -13,8 +13,10 @@ import { Audio } from 'expo-av';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import { PlayerScreenProps } from '../types';
-import { NotificationService } from '../services/NotificationService';
+import { NotificationService, NotificationAction } from '../services/NotificationService';
 import { AppState, AppStateStatus } from 'react-native';
+import { Subscription } from 'expo-modules-core';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
   const [sound, setSound] = useState<Audio.Sound | null>(null);
@@ -26,6 +28,8 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const timeLeftRef = useRef<number>(30 * 60);
   const isPlayingRef = useRef<boolean>(false);
+  const durationRef = useRef<number>(30);
+  const notificationSubscription = useRef<Subscription | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -36,7 +40,11 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
           shouldDuckAndroid: false,
           playThroughEarpieceAndroid: false,
         });
-        await NotificationService.initialize();
+        notificationSubscription.current = await NotificationService.initialize();
+        
+        // 알림 액션 콜백 설정
+        NotificationService.setActionCallback(handleNotificationAction);
+        
         await loadSound();
       } catch (e: any) {
         Alert.alert("오디오 설정 오류", e.message);
@@ -56,6 +64,9 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
       NotificationService.hideNotification();
       NotificationService.stopBackgroundUpdates();
       subscription.remove();
+      if (notificationSubscription.current) {
+        notificationSubscription.current.remove();
+      }
     };
   }, []);
 
@@ -76,16 +87,49 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
     }
   };
 
+  const handleNotificationAction = async (action: NotificationAction) => {
+    switch (action) {
+      case 'play':
+        if (!isPlayingRef.current && sound) {
+          await sound.playAsync();
+          setIsPlaying(true);
+          startTimer();
+          await activateKeepAwakeAsync();
+        }
+        break;
+      case 'pause':
+        if (isPlayingRef.current && sound) {
+          await sound.pauseAsync();
+          setIsPlaying(false);
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+          }
+          deactivateKeepAwake();
+        }
+        break;
+      case 'stop':
+        await handleStop();
+        break;
+    }
+  };
+
   const handleAppStateChange = (nextAppState: AppStateStatus) => {
     if (appStateRef.current.match(/active/) && nextAppState.match(/inactive|background/)) {
-      if (isPlayingRef.current) {
-        NotificationService.showPlayingNotification(timeLeftRef.current, true);
+      // 백그라운드로 전환될 때
+      if (isPlayingRef.current || timeLeftRef.current < (durationRef.current * 60)) {
+        NotificationService.showPlayingNotification(
+          timeLeftRef.current, 
+          isPlayingRef.current,
+          durationRef.current
+        );
         NotificationService.startBackgroundUpdates(
           () => timeLeftRef.current,
-          () => isPlayingRef.current
+          () => isPlayingRef.current,
+          () => durationRef.current
         );
       }
     } else if (nextAppState === 'active') {
+      // 포그라운드로 돌아올 때
       NotificationService.hideNotification();
       NotificationService.stopBackgroundUpdates();
     }
@@ -100,6 +144,10 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
+  useEffect(() => {
+    durationRef.current = durationMinutes;
+  }, [durationMinutes]);
+
   const togglePlayback = async (): Promise<void> => {
     if (!sound) return;
 
@@ -109,7 +157,12 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
-      NotificationService.hideNotification();
+      deactivateKeepAwake();
+      
+      // 일시정지 상태로 알림 업데이트
+      if (appStateRef.current.match(/inactive|background/)) {
+        NotificationService.showPlayingNotification(timeLeft, false, durationMinutes);
+      }
     } else {
       if (timeLeft <= 0) {
         setTimeLeft(durationMinutes * 60);
@@ -117,12 +170,14 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
       await sound.playAsync();
       setIsPlaying(true);
       startTimer();
+      await activateKeepAwakeAsync();
       
       if (appStateRef.current.match(/inactive|background/)) {
-        NotificationService.showPlayingNotification(timeLeft, true);
+        NotificationService.showPlayingNotification(timeLeft, true, durationMinutes);
         NotificationService.startBackgroundUpdates(
           () => timeLeftRef.current,
-          () => isPlayingRef.current
+          () => isPlayingRef.current,
+          () => durationRef.current
         );
       }
     }
@@ -148,6 +203,7 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
     }
+    deactivateKeepAwake();
     NotificationService.hideNotification();
     NotificationService.stopBackgroundUpdates();
     setTimeout(() => {
@@ -162,13 +218,14 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
   };
 
   const handleStop = async (): Promise<void> => {
-    if (sound && isPlaying) {
+    if (sound) {
       await sound.stopAsync();
       setIsPlaying(false);
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
       setTimeLeft(durationMinutes * 60);
+      deactivateKeepAwake();
       NotificationService.hideNotification();
       NotificationService.stopBackgroundUpdates();
     }
