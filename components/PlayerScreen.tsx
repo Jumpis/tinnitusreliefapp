@@ -7,16 +7,17 @@ import {
   SafeAreaView, 
   Alert, 
   ActivityIndicator,
-  Platform 
+  Platform,
+  AppState,
+  AppStateStatus
 } from 'react-native';
 import { Audio } from 'expo-av';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import { PlayerScreenProps } from '../types';
 import { NotificationService, NotificationAction } from '../services/NotificationService';
-import { AppState, AppStateStatus } from 'react-native';
-import { Subscription } from 'expo-modules-core';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import * as Notifications from 'expo-notifications';
 
 export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
   const [sound, setSound] = useState<Audio.Sound | null>(null);
@@ -29,7 +30,7 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
   const timeLeftRef = useRef<number>(30 * 60);
   const isPlayingRef = useRef<boolean>(false);
   const durationRef = useRef<number>(30);
-  const notificationSubscription = useRef<Subscription | null>(null);
+  const notificationSubscription = useRef<Notifications.Subscription | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -46,8 +47,8 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
         NotificationService.setActionCallback(handleNotificationAction);
         
         await loadSound();
-      } catch (e: any) {
-        Alert.alert("오디오 설정 오류", e.message);
+      } catch {
+        Alert.alert("오디오 설정 오류", "오디오 설정 중 문제가 발생했습니다.");
         setIsLoading(false);
       }
     })();
