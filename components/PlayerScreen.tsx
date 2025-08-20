@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -9,7 +9,8 @@ import {
   ActivityIndicator,
   Platform,
   AppState,
-  AppStateStatus
+  AppStateStatus,
+  NativeEventSubscription
 } from 'react-native';
 import { Audio } from 'expo-av';
 import Slider from '@react-native-community/slider';
@@ -30,7 +31,83 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
   const timeLeftRef = useRef<number>(30 * 60);
   const isPlayingRef = useRef<boolean>(false);
   const durationRef = useRef<number>(30);
-  const notificationSubscription = useRef<Notifications.Subscription | null>(null);
+  const notificationSubscription = useRef<Notifications.EventSubscription | null>(null);
+
+  const startTimer = useCallback((): void => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+    intervalRef.current = setInterval(() => {
+      setTimeLeft((prevTime: number) => {
+        console.log('Timer tick:', prevTime);
+        if (prevTime <= 1) {
+          return 0;
+        }
+        return prevTime - 1;
+      });
+    }, 1000);
+  }, []);
+
+  const handleStop = useCallback(async (): Promise<void> => {
+    if (sound) {
+      await sound.stopAsync();
+      setIsPlaying(false);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      setTimeLeft(durationMinutes * 60);
+      deactivateKeepAwake();
+      NotificationService.hideNotification();
+      NotificationService.stopBackgroundUpdates();
+    }
+  }, [sound, durationMinutes]);
+
+  const stopAndReset = useCallback(async (): Promise<void> => {
+    if (sound) {
+      await sound.stopAsync();
+    }
+    setIsPlaying(false);
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+    deactivateKeepAwake();
+    NotificationService.hideNotification();
+    NotificationService.stopBackgroundUpdates();
+    setTimeout(() => {
+      setTimeLeft(durationMinutes * 60);
+    }, 100);
+  }, [sound, durationMinutes]);
+
+  const soundRef = useRef<Audio.Sound | null>(null);
+  
+  const handleNotificationAction = useCallback(async (action: NotificationAction) => {
+    const currentSound = soundRef.current;
+    if (!currentSound) return;
+    
+    switch (action) {
+      case 'play':
+        if (!isPlayingRef.current) {
+          await currentSound.playAsync();
+          setIsPlaying(true);
+          startTimer();
+          await activateKeepAwakeAsync();
+        }
+        break;
+      case 'pause':
+        if (isPlayingRef.current) {
+          await currentSound.pauseAsync();
+          setIsPlaying(false);
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+          }
+          deactivateKeepAwake();
+        }
+        break;
+      case 'stop':
+        await handleStop();
+        break;
+    }
+  }, [startTimer, handleStop]);
 
   useEffect(() => {
     (async () => {
@@ -43,7 +120,6 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
         });
         notificationSubscription.current = await NotificationService.initialize();
         
-        // 알림 액션 콜백 설정
         NotificationService.setActionCallback(handleNotificationAction);
         
         await loadSound();
@@ -53,7 +129,7 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
       }
     })();
 
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    const subscription: NativeEventSubscription = AppState.addEventListener('change', handleAppStateChange);
 
     return () => {
       if (sound) {
@@ -73,50 +149,28 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
 
   const loadSound = async (): Promise<void> => {
     try {
+      console.log('Loading sound...');
       const { sound: loadedSound } = await Audio.Sound.createAsync(
         require('../assets/sounds/white_noise.mp3'),
         {
           isLooping: true,
           shouldPlay: false,
+          volume: 1.0,
         }
       );
+      console.log('Sound loaded successfully');
       setSound(loadedSound);
+      soundRef.current = loadedSound;
       setIsLoading(false);
-    } catch (e) {
+    } catch (error) {
+      console.error('Sound loading error:', error);
       Alert.alert("음원 로드 실패", "음원 파일을 확인해주세요.");
       setIsLoading(false);
     }
   };
 
-  const handleNotificationAction = async (action: NotificationAction) => {
-    switch (action) {
-      case 'play':
-        if (!isPlayingRef.current && sound) {
-          await sound.playAsync();
-          setIsPlaying(true);
-          startTimer();
-          await activateKeepAwakeAsync();
-        }
-        break;
-      case 'pause':
-        if (isPlayingRef.current && sound) {
-          await sound.pauseAsync();
-          setIsPlaying(false);
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current);
-          }
-          deactivateKeepAwake();
-        }
-        break;
-      case 'stop':
-        await handleStop();
-        break;
-    }
-  };
-
   const handleAppStateChange = (nextAppState: AppStateStatus) => {
     if (appStateRef.current.match(/active/) && nextAppState.match(/inactive|background/)) {
-      // 백그라운드로 전환될 때
       if (isPlayingRef.current || timeLeftRef.current < (durationRef.current * 60)) {
         NotificationService.showPlayingNotification(
           timeLeftRef.current, 
@@ -130,7 +184,6 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
         );
       }
     } else if (nextAppState === 'active') {
-      // 포그라운드로 돌아올 때
       NotificationService.hideNotification();
       NotificationService.stopBackgroundUpdates();
     }
@@ -139,7 +192,10 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
 
   useEffect(() => {
     timeLeftRef.current = timeLeft;
-  }, [timeLeft]);
+    if (timeLeft === 0 && isPlaying) {
+      stopAndReset();
+    }
+  }, [timeLeft, isPlaying, stopAndReset]);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -149,68 +205,54 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
     durationRef.current = durationMinutes;
   }, [durationMinutes]);
 
-  const togglePlayback = async (): Promise<void> => {
-    if (!sound) return;
-
-    if (isPlaying) {
-      await sound.pauseAsync();
-      setIsPlaying(false);
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-      deactivateKeepAwake();
-      
-      // 일시정지 상태로 알림 업데이트
-      if (appStateRef.current.match(/inactive|background/)) {
-        NotificationService.showPlayingNotification(timeLeft, false, durationMinutes);
-      }
-    } else {
-      if (timeLeft <= 0) {
-        setTimeLeft(durationMinutes * 60);
-      }
-      await sound.playAsync();
-      setIsPlaying(true);
-      startTimer();
-      await activateKeepAwakeAsync();
-      
-      if (appStateRef.current.match(/inactive|background/)) {
-        NotificationService.showPlayingNotification(timeLeft, true, durationMinutes);
-        NotificationService.startBackgroundUpdates(
-          () => timeLeftRef.current,
-          () => isPlayingRef.current,
-          () => durationRef.current
-        );
-      }
+  const togglePlayback = useCallback(async (): Promise<void> => {
+    if (!sound) {
+      console.log('Sound not loaded');
+      return;
     }
-  };
 
-  const startTimer = (): void => {
-    intervalRef.current = setInterval(() => {
-      setTimeLeft((prevTime: number) => {
-        if (prevTime <= 1) {
-          stopAndReset();
-          return 0;
+    try {
+      if (isPlaying) {
+        console.log('Pausing playback');
+        await sound.pauseAsync();
+        setIsPlaying(false);
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
         }
-        return prevTime - 1;
-      });
-    }, 1000);
-  };
+        deactivateKeepAwake();
+        
+        if (appStateRef.current.match(/inactive|background/)) {
+          NotificationService.showPlayingNotification(timeLeft, false, durationMinutes);
+        }
+      } else {
+        console.log('Starting playback');
+        if (timeLeft <= 0) {
+          setTimeLeft(durationMinutes * 60);
+        }
+        
+        const status = await sound.getStatusAsync();
+        console.log('Sound status before play:', status);
+        
+        await sound.playAsync();
+        setIsPlaying(true);
+        startTimer();
+        await activateKeepAwakeAsync();
+        
+        if (appStateRef.current.match(/inactive|background/)) {
+          NotificationService.showPlayingNotification(timeLeft, true, durationMinutes);
+          NotificationService.startBackgroundUpdates(
+            () => timeLeftRef.current,
+            () => isPlayingRef.current,
+            () => durationRef.current
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Playback error:', error);
+      Alert.alert('재생 오류', '오디오 재생 중 문제가 발생했습니다.');
+    }
+  }, [sound, isPlaying, timeLeft, durationMinutes, startTimer]);
 
-  const stopAndReset = async (): Promise<void> => {
-    if (sound) {
-      await sound.stopAsync();
-    }
-    setIsPlaying(false);
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
-    deactivateKeepAwake();
-    NotificationService.hideNotification();
-    NotificationService.stopBackgroundUpdates();
-    setTimeout(() => {
-      setTimeLeft(durationMinutes * 60);
-    }, 100);
-  };
 
   const handleDurationChange = (value: number): void => {
     if (isPlaying) return;
@@ -218,26 +260,12 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
     setTimeLeft(value * 60);
   };
 
-  const handleStop = async (): Promise<void> => {
-    if (sound) {
-      await sound.stopAsync();
-      setIsPlaying(false);
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-      setTimeLeft(durationMinutes * 60);
-      deactivateKeepAwake();
-      NotificationService.hideNotification();
-      NotificationService.stopBackgroundUpdates();
-    }
-  };
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
-
 
   if (isLoading) {
     return (
@@ -298,7 +326,7 @@ export default function PlayerScreen({ onLogout }: PlayerScreenProps) {
         </TouchableOpacity>
         
         <TouchableOpacity 
-          onPress={handleStop} 
+          onPress={() => handleStop()} 
           style={[styles.stopButton, (!sound || !isPlaying) && styles.disabledButton]} 
           disabled={!sound || !isPlaying}
         >
